@@ -1,0 +1,92 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+#include <string.h>
+
+#define MAX_CHILDREN 5 // Maximum number of child processes
+#define BUFFER_SIZE 256 // Size of the message buffer
+
+int numChildren = 0; // Counter for the number of child processes
+
+void interruptHandler(int signum)
+{
+    printf("\nInterrupt detected! Exiting...\n");
+    exit(0);
+}
+
+void childProcess(int fd[2])
+{
+    close(fd[1]); // Close write end of the pipe
+
+    char buffer[BUFFER_SIZE];
+    int bytesRead;
+
+    while ((bytesRead = read(fd[0], buffer, BUFFER_SIZE)) > 0)
+    {
+        printf("Child Process %d: Received message: %s\n", getpid(), buffer);
+        memset(buffer, 0, BUFFER_SIZE);
+    }
+
+    close(fd[0]); // Close read end of the pipe
+    exit(0);
+}
+
+int main()
+{
+    int fd[2]; // File descriptors for the pipe
+    pid_t childPID;
+
+    signal(SIGINT, interruptHandler); // Set up signal handler for interrupt (Ctrl + C)
+
+    if (pipe(fd) == -1)
+    {
+        perror("Pipe creation failed");
+        exit(1);
+    }
+
+    while (1)
+    {
+        printf("Enter a message (or type 'exit' to quit): ");
+        char message[BUFFER_SIZE];
+        fgets(message, BUFFER_SIZE, stdin);
+        message[strcspn(message, "\n")] = '\0'; // Remove trailing newline
+
+        if (strcmp(message, "exit") == 0)
+        {
+            break; // Exit loop if 'exit' is entered
+        }
+
+        childPID = fork(); // Fork a child process
+
+        if (childPID == -1)
+        {
+            perror("Fork failed");
+            exit(1);
+        }
+        else if (childPID == 0)
+        {
+            childProcess(fd); // Child process reads from the pipe
+        }
+        else
+        {
+            numChildren++;
+            close(fd[0]); // Close read end of the pipe
+
+            printf("Parent Process: Sending message '%s' to Child Process %d\n", message, numChildren);
+            write(fd[1], message, strlen(message) + 1); // Write message to the pipe
+            memset(message, 0, BUFFER_SIZE);
+
+            close(fd[1]); // Close write end of the pipe
+            numChildren--;
+        }
+    }
+
+    // Clean up remaining child processes
+    while (numChildren > 0)
+    {
+        sleep(1); // Sleep for 1 second to avoid busy waiting
+    }
+
+    return 0;
+}
